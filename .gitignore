@@ -1,9 +1,18 @@
 # Build artifacts
-/target/
 /build/
+/cmake-build-*/
+*.o
+*.so
+*.dylib
+*.dll
+*.a
 
-# Cargo lock is usually committed for binary crates
-# but we'll include it for reproducible builds
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
 
 # IDE
 .idea/

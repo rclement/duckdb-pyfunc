@@ -1,21 +1,24 @@
 # DuckDB PyFunc Extension
 
-A DuckDB extension that allows registering Python User Defined Functions (UDFs) directly from SQL statements, without requiring the DuckDB Python package.
+A DuckDB extension that allows registering Python User Defined Functions (UDFs) directly from SQL statements using native Databricks Spark-style syntax.
 
 ## Features
 
-- Define Python UDFs using SQL syntax similar to Databricks Spark
+- **Native SQL Syntax**: Use `CREATE FUNCTION ... LANGUAGE PYTHON AS $ ... $` syntax directly in SQL
 - Execute Python code within DuckDB queries
-- Support for various data types (VARCHAR, INTEGER, DOUBLE, BOOLEAN, etc.)
+- Support for various data types (VARCHAR, INTEGER, DOUBLE, BOOLEAN, DATE, TIMESTAMP, etc.)
+- Embedded Python interpreter using pybind11
 - No Python SDK required - just load the extension and use SQL
 
 ## Installation
 
 ### Prerequisites
 
-- Rust toolchain (1.70+)
+- CMake 3.15+
+- C++17 compatible compiler
 - Python 3.8+ with development headers
-- DuckDB 1.4.3+
+- DuckDB 1.1.3+ (automatically fetched if not found)
+- pybind11 (automatically fetched if not found)
 
 ### Building
 
@@ -24,11 +27,13 @@ A DuckDB extension that allows registering Python User Defined Functions (UDFs) 
 git clone <repo-url>
 cd duckdb-pyfunc
 
-# Build debug version
-make debug
+# Build using the build script
+./scripts/build.sh
 
-# Build release version
-make release
+# Or manually with CMake
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build . -j$(nproc)
 ```
 
 ## Usage
@@ -39,30 +44,44 @@ make release
 -- Start DuckDB with unsigned extension support
 -- duckdb -unsigned
 
-LOAD './path/to/duckdb_pyfunc.duckdb_extension';
+LOAD 'build/libpyfunc.so';  -- or .dylib on macOS
 ```
 
 ### Creating a Python UDF
 
-Use the `create_py_function` table function to define a new Python UDF:
+Use the native Databricks-style `CREATE FUNCTION` syntax:
 
 ```sql
--- Syntax: create_py_function(name, parameters, return_type, body)
-SELECT * FROM create_py_function(
-    'greet',
-    'name VARCHAR',
-    'VARCHAR',
-    'return "Hello " + name + "!"'
-);
+-- Simple function
+CREATE FUNCTION greet(name VARCHAR) RETURNS VARCHAR LANGUAGE PYTHON AS $
+return f"Hello, {name}!"
+$;
+
+-- Function with multiple parameters
+CREATE FUNCTION add_numbers(a INTEGER, b INTEGER) RETURNS INTEGER LANGUAGE PYTHON AS $
+return a + b
+$;
+
+-- Function using Python libraries
+CREATE FUNCTION circle_area(radius DOUBLE) RETURNS DOUBLE LANGUAGE PYTHON AS $
+import math
+return math.pi * radius ** 2
+$;
 ```
 
-### Calling a Python UDF
+### Calling Python UDFs
 
-Use the `py_call` table function to invoke registered UDFs:
+Once defined, use the function like any native DuckDB function:
 
 ```sql
-SELECT * FROM py_call('greet', 'World');
--- Returns: Hello World!
+SELECT greet('World');
+-- Returns: Hello, World!
+
+SELECT add_numbers(10, 20);
+-- Returns: 30
+
+SELECT circle_area(5.0);
+-- Returns: 78.53981633974483
 ```
 
 ### Listing Registered Functions
@@ -71,140 +90,142 @@ SELECT * FROM py_call('greet', 'World');
 SELECT * FROM list_py_functions();
 ```
 
+### Dropping Functions
+
+```sql
+SELECT drop_py_function('function_name');
+```
+
 ## Examples
 
 ### String Functions
 
 ```sql
--- Create a function to reverse a string
-SELECT * FROM create_py_function(
-    'reverse_str',
-    's VARCHAR',
-    'VARCHAR',
-    'return s[::-1]'
-);
+CREATE FUNCTION reverse_str(s VARCHAR) RETURNS VARCHAR LANGUAGE PYTHON AS $
+return s[::-1]
+$;
 
-SELECT * FROM py_call('reverse_str', 'hello');
+SELECT reverse_str('hello');
 -- Returns: olleh
 ```
 
 ### Numeric Functions
 
 ```sql
--- Create a function to calculate factorial
-SELECT * FROM create_py_function(
-    'factorial',
-    'n INTEGER',
-    'INTEGER',
-    'result = 1
+CREATE FUNCTION factorial(n INTEGER) RETURNS INTEGER LANGUAGE PYTHON AS $
+result = 1
 for i in range(1, n + 1):
     result *= i
-return result'
-);
+return result
+$;
 
-SELECT * FROM py_call('factorial', '5');
+SELECT factorial(5);
 -- Returns: 120
 ```
 
-### Using Python Libraries
+### Date Functions
 
 ```sql
--- Use the math library
-SELECT * FROM create_py_function(
-    'circle_area',
-    'radius DOUBLE',
-    'DOUBLE',
-    'import math
-return math.pi * radius ** 2'
-);
+CREATE FUNCTION days_until_christmas(d DATE) RETURNS INTEGER LANGUAGE PYTHON AS $
+import datetime
+christmas = datetime.date(d.year, 12, 25)
+if d > christmas:
+    christmas = datetime.date(d.year + 1, 12, 25)
+return (christmas - d).days
+$;
 
-SELECT * FROM py_call('circle_area', '5.0');
--- Returns: 78.53981633974483
+SELECT days_until_christmas(DATE '2024-12-01');
+-- Returns: 24
 ```
 
-### Multiple Parameters
+### Using External Libraries
 
 ```sql
--- Function with multiple parameters
-SELECT * FROM create_py_function(
-    'full_name',
-    'first VARCHAR, last VARCHAR',
-    'VARCHAR',
-    'return first + " " + last'
-);
+-- Requires numpy to be installed in the Python environment
+CREATE FUNCTION numpy_mean(values VARCHAR) RETURNS DOUBLE LANGUAGE PYTHON AS $
+import numpy as np
+import json
+arr = json.loads(values)
+return float(np.mean(arr))
+$;
 
-SELECT * FROM py_call('full_name', 'John', 'Doe');
--- Returns: John Doe
+SELECT numpy_mean('[1, 2, 3, 4, 5]');
+-- Returns: 3.0
 ```
 
 ## SQL Syntax Reference
-
-The extension supports Databricks-style CREATE FUNCTION syntax for reference:
 
 ```sql
 CREATE FUNCTION function_name(param1 TYPE1, param2 TYPE2, ...)
 RETURNS return_type
 LANGUAGE PYTHON
-AS $$
+AS $
 python_code_here
-$$
+$;
 ```
 
-Currently implemented via table functions:
-- `create_py_function(name, params, return_type, body)` - Register a UDF
-- `py_call(name, arg1, arg2, ...)` - Call a registered UDF
-- `list_py_functions()` - List all registered UDFs
-
-## Supported Data Types
+### Supported Parameter Types
 
 | SQL Type | Python Type |
 |----------|-------------|
 | VARCHAR, STRING, TEXT | str |
 | INTEGER, INT | int |
 | BIGINT | int |
-| SMALLINT, TINYINT | int |
+| SMALLINT | int |
+| TINYINT | int |
 | FLOAT, REAL | float |
 | DOUBLE | float |
 | BOOLEAN, BOOL | bool |
 | BLOB, BINARY | bytes |
+| DATE | datetime.date |
+| TIMESTAMP | datetime.datetime |
 
 ## Development
 
 ### Running Tests
 
 ```bash
-make test
+# Run the SQL test script
+duckdb -unsigned < test/test_pyfunc.sql
 ```
 
-### Code Quality
+### Project Structure
 
-```bash
-make check    # Run cargo check
-make clippy   # Run clippy linter
-make fmt      # Format code
 ```
-
-### Running DuckDB with Extension
-
-```bash
-make run
+duckdb-pyfunc/
+├── CMakeLists.txt              # Build configuration
+├── src/
+│   ├── include/
+│   │   └── pyfunc_extension.hpp  # Main header
+│   ├── pyfunc_extension.cpp      # Extension entry point
+│   ├── pyfunc_parser.cpp         # SQL parser extension
+│   ├── pyfunc_function.cpp       # Python executor
+│   └── pyfunc_registry.cpp       # Function registry
+├── scripts/
+│   └── build.sh                  # Build script
+└── test/
+    └── test_pyfunc.sql           # SQL tests
 ```
 
 ## Architecture
 
 The extension is built with:
-- **Rust** - Core extension logic
-- **PyO3** - Python/Rust interoperability
-- **DuckDB C API** - Extension integration
+- **C++17** - Core extension logic
+- **pybind11** - Python/C++ interoperability (embedded interpreter)
+- **DuckDB C++ API** - Parser extension and function registration
 
-### Module Structure
+### Key Components
 
-- `lib.rs` - Extension entry point
-- `parser.rs` - SQL syntax parser
-- `python_executor.rs` - PyO3 Python execution
-- `function_registry.rs` - UDF storage
-- `scalar_function.rs` - DuckDB function registration
-- `create_function_vtab.rs` - Table function implementations
+- **PyFuncParserExtension**: Parses `CREATE FUNCTION ... LANGUAGE PYTHON` statements
+- **PyFunctionRegistry**: Stores registered Python function definitions
+- **PyExecutor**: Manages the embedded Python interpreter and executes functions
+- **Type Converters**: Convert between DuckDB Values and Python objects
+
+## Limitations
+
+- Functions are stored in memory and not persisted across sessions
+- The Python interpreter is shared across all functions
+- Global state in Python functions persists between calls
 
 ## License
 
@@ -213,5 +234,5 @@ MIT License
 ## Acknowledgments
 
 - [DuckDB](https://duckdb.org/) - The database engine
-- [PyO3](https://pyo3.rs/) - Rust bindings for Python
+- [pybind11](https://pybind11.readthedocs.io/) - C++/Python interoperability
 - [Databricks](https://databricks.com/) - SQL syntax inspiration
