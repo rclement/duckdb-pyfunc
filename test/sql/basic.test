@@ -1,0 +1,28 @@
+# Basic tests for duckdb-pyfunc extension
+
+# Load the extension
+LOAD './build/debug/extension/duckdb_pyfunc/duckdb_pyfunc.duckdb_extension';
+
+# Test creating a simple function
+SELECT * FROM create_py_function('greet', 'name VARCHAR', 'VARCHAR', 'return "Hello " + name + "!"');
+
+# Test listing functions
+SELECT * FROM list_py_functions();
+
+# Test calling the function
+SELECT * FROM py_call('greet', 'World');
+
+# Test creating a numeric function
+SELECT * FROM create_py_function('add_nums', 'a INTEGER, b INTEGER', 'INTEGER', 'return a + b');
+
+# Test the numeric function
+SELECT * FROM py_call('add_nums', '5', '3');
+
+# Test a function with no parameters
+SELECT * FROM create_py_function('get_answer', '', 'INTEGER', 'return 42');
+
+# Call it
+SELECT * FROM py_call('get_answer');
+
+# Test listing all functions again
+SELECT * FROM list_py_functions();
