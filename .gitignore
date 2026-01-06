@@ -1,0 +1,26 @@
+# Build artifacts
+/target/
+/build/
+
+# Cargo lock is usually committed for binary crates
+# but we'll include it for reproducible builds
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# DuckDB extension tools
+extension-ci-tools/
+
+# OS
+.DS_Store
+Thumbs.db
